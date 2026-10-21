@@ -1,6 +1,6 @@
 // オフラインでも遊べるようにするためのキャッシュ。
 // ファイルを更新したら VERSION を上げる。
-const VERSION = 'asobi-v2';
+const VERSION = 'asobi-v3';
 const FILES = [
   './',
   'index.html',
