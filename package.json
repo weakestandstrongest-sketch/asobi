@@ -1,0 +1,10 @@
+{
+  "name": "asobi",
+  "private": true,
+  "type": "module",
+  "description": "iPhone 1台で2人で遊べるボードゲーム集",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "start": "npx serve ."
+  }
+}
