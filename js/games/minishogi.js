@@ -1,4 +1,4 @@
-import { h, gameShell, playerPanel, modal, sfx, settings, fitBox } from '../ui.js';
+import { h, s, gameShell, playerPanel, modal, showResult, sfx, settings, fitBoard, ensureDefs, woodTexture } from '../ui.js';
 import * as S from './minishogi-logic.js';
 
 const RULES = `
@@ -14,21 +14,35 @@ const RULES = `
 const NAMES = ['先手', '後手'];
 const NAMES_HAND = { R: '飛', B: '角', G: '金', S: '銀', P: '歩' };
 
+// 駒の大きさは種類で少し変える (玉が一番大きく、歩が一番小さい)
+const KOMA_SCALE = { K: 1, R: 0.97, B: 0.97, G: 0.94, S: 0.94, P: 0.88 };
+
 function komaEl(piece, extra = '') {
-  return h('span', { class: `koma ${piece.o ? 'gote' : 'sente'} ${piece.p ? 'promoted' : ''} ${extra}` },
-    h('span', { class: 'koma-text' }, S.pieceLabel(piece)));
+  const k = KOMA_SCALE[piece.t];
+  const svg = s('svg', {
+    viewBox: '0 0 100 110',
+    class: `koma ${piece.o ? 'gote' : 'sente'} ${piece.p ? 'promoted' : ''} ${extra}`,
+    style: { '--k': k },
+  });
+  svg.append(
+    s('path', { class: 'koma-edge', d: 'M50 3 L83 15 L96 107 H4 L17 15 Z' }),
+    s('path', { class: 'koma-face', d: 'M50 8 L79 19 L91 102 H9 L21 19 Z' }),
+    s('text', { x: 50, y: 64, class: 'koma-text', 'text-anchor': 'middle', 'dominant-baseline': 'central' }, S.pieceLabel(piece)));
+  return svg;
 }
 
 export function mount(root) {
   let state, history, positions, selected, over, lastTo;
+  ensureDefs();
   const ui = gameShell(root, { title: '5五将棋', rules: RULES, onUndo: undo, onRestart: restart });
-  const top = playerPanel({ name: '☖ 後手', mark: null, flip: settings.faceToFace });
-  const bottom = playerPanel({ name: '☗ 先手', mark: null });
+  const top = playerPanel({ name: '後手', mark: komaEl({ o: 1, t: 'K', p: false }, 'avatar upright'), flip: settings.faceToFace });
+  const bottom = playerPanel({ name: '先手', mark: komaEl({ o: 0, t: 'K', p: false }, 'avatar upright') });
   const panels = [bottom, top];
   const board = h('div', { class: 'shogi-board' });
-  const wrap = h('div', { class: 'board-wrap' }, board);
+  const frame = h('div', { class: 'shogi-frame', style: { backgroundImage: `url(${woodTexture({ light: '#f0cf8c', dark: '#ddb066', seed: 3 })})` } }, board);
+  const wrap = h('div', { class: 'board-wrap' }, frame);
   ui.main.append(top.el, wrap, bottom.el);
-  const unfit = fitBox(wrap, board, 1.08);
+  const unfit = fitBoard(ui.main, wrap, frame, 1.08);
 
   const cells = [];
   for (let i = 0; i < 25; i++) {
@@ -106,14 +120,16 @@ export function mount(root) {
     if (status.over) {
       over = true;
       render(status);
-      setTimeout(() => {
+      setTimeout(async () => {
         sfx('win');
-        modal({
-          title: `${NAMES[status.winner]}の勝ち！`,
-          body: h('p', {}, `${status.reason}（${history.length}手）`),
-          buttons: [{ label: '閉じる', value: false }, { label: 'もう一度', value: true, primary: true }],
-        }).then((again) => { if (again) restart(); });
-      }, 450);
+        const again = await showResult({
+          title: `${NAMES[status.winner]}の勝ち`,
+          mark: komaEl({ o: status.winner, t: 'K', p: false }, 'upright'),
+          detail: `${status.reason}・${history.length}手`,
+          flip: settings.faceToFace && status.winner === 1,
+        });
+        if (again === 'again') restart();
+      }, 600);
       return;
     }
     if (status.check) setTimeout(() => sfx('check'), 120);

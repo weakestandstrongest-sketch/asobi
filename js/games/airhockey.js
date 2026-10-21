@@ -1,4 +1,4 @@
-import { h, icon, modal, sfx, showRules, loadPref, savePref } from '../ui.js';
+import { h, icon, modal, showResult, sfx, showRules, loadPref, savePref } from '../ui.js';
 
 const RULES = `
 <p>iPhone を机に置いて、上下に向かい合って遊びます。自分側の半分に指を置くと、マレット (打つ道具) がついてきます。</p>
@@ -20,7 +20,14 @@ const WALL_E = 0.9;
 const MALLET_E = 0.85;
 const FRICTION = 0.18;     // 速度の減衰率 /秒
 const SUBSTEPS = 8;
-const COLORS = ['#4fc3f7', '#ff7a7a'];
+const COLORS = ['#63c7ff', '#ff8070'];
+
+// 色を暗くする (#rrggbb のみ)
+function shade(hex, k = 0.45) {
+  const n = parseInt(hex.slice(1), 16);
+  const f = (v) => Math.round(v * k);
+  return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`;
+}
 
 export function mount(root) {
   let H = 180;
@@ -200,18 +207,21 @@ export function mount(root) {
     phase = score[scorer] >= target ? 'over' : 'goal';
     phaseTimer = 1.3;
     puck.vx = puck.vy = 0;
-    if (phase === 'over') setTimeout(() => showResult(scorer), 700);
+    if (phase === 'over') setTimeout(() => announceWinner(scorer), 700);
     return scorer;
   }
 
-  async function showResult(winner) {
+  async function announceWinner(winner) {
     sfx('win');
-    const again = await modal({
-      title: `${winner === 0 ? '下' : '上'}の人の勝ち！`,
-      body: h('p', { class: 'result-score' }, `${score[0]} − ${score[1]}`),
+    const again = await showResult({
+      title: `${winner === 0 ? '下' : '上'}の人の勝ち`,
+      accent: COLORS[winner],
+      detail: h('div', { class: 'score-line' },
+        h('span', { style: { color: COLORS[0] } }, h('b', {}, score[0])),
+        h('span', { class: 'vs' }, '−'),
+        h('span', { style: { color: COLORS[1] } }, h('b', {}, score[1]))),
       flip: winner === 1,
       buttons: [{ label: 'メニューへ', value: 'menu' }, { label: 'もう一度', value: 'again', primary: true }],
-      dismissible: false,
     });
     if (again === 'again') restart();
     else if (again === 'menu') location.hash = '#/';
@@ -249,119 +259,161 @@ export function mount(root) {
   }
 
   // ---- 描画 ----
-  function draw() {
-    ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = '#0b1f33';
-    ctx.fillRect(0, 0, W, H);
-    // 陣地の色
-    const grad0 = ctx.createLinearGradient(0, H, 0, H / 2);
-    grad0.addColorStop(0, 'rgba(79,195,247,0.16)');
-    grad0.addColorStop(1, 'rgba(79,195,247,0)');
-    ctx.fillStyle = grad0;
-    ctx.fillRect(0, H / 2, W, H / 2);
-    const grad1 = ctx.createLinearGradient(0, 0, 0, H / 2);
-    grad1.addColorStop(0, 'rgba(255,122,122,0.16)');
-    grad1.addColorStop(1, 'rgba(255,122,122,0)');
-    ctx.fillStyle = grad1;
-    ctx.fillRect(0, 0, W, H / 2);
+  // 動かない盤面は大きさが変わったときだけ別の canvas に描いておく
+  let table = null;
 
-    ctx.lineWidth = 0.6;
-    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-    ctx.beginPath();
-    ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(W / 2, H / 2, 14, 0, Math.PI * 2);
-    ctx.stroke();
-    for (const [py, color, start] of [[0, COLORS[1], 0], [H, COLORS[0], Math.PI]]) {
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.6;
-      ctx.beginPath();
-      ctx.arc(W / 2, py, GOAL_HALF + 6, start, start + Math.PI);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      // ゴール口
-      ctx.lineWidth = 2.2;
-      ctx.strokeStyle = '#fff';
-      ctx.shadowColor = color;
-      ctx.shadowBlur = 6;
-      ctx.beginPath();
-      ctx.moveTo(W / 2 - GOAL_HALF, py); ctx.lineTo(W / 2 + GOAL_HALF, py);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-      ctx.lineWidth = 0.6;
+  function renderTable() {
+    const dpr = canvas.width / (W * scale);
+    table = document.createElement('canvas');
+    table.width = canvas.width;
+    table.height = canvas.height;
+    const t = table.getContext('2d');
+    t.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+    const bg = t.createRadialGradient(W / 2, H / 2, 10, W / 2, H / 2, H * 0.75);
+    bg.addColorStop(0, '#123a5e');
+    bg.addColorStop(1, '#061527');
+    t.fillStyle = bg;
+    t.fillRect(0, 0, W, H);
+    for (const [y0, y1, color] of [[H, H / 2, '99,199,255'], [0, H / 2, '255,128,112']]) {
+      const g = t.createLinearGradient(0, y0, 0, y1);
+      g.addColorStop(0, `rgba(${color},0.22)`);
+      g.addColorStop(1, `rgba(${color},0)`);
+      t.fillStyle = g;
+      t.fillRect(0, Math.min(y0, y1), W, H / 2);
     }
-    // 枠
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-    ctx.lineWidth = 1.2;
-    ctx.strokeRect(0.6, 0.6, W - 1.2, H - 1.2);
+    // エアの穴
+    t.fillStyle = 'rgba(255,255,255,0.07)';
+    for (let y = 4; y < H; y += 6) {
+      for (let x = (y / 6) % 2 ? 4 : 7; x < W; x += 6) {
+        t.beginPath(); t.arc(x, y, 0.45, 0, Math.PI * 2); t.fill();
+      }
+    }
+    t.lineWidth = 0.7;
+    t.strokeStyle = 'rgba(255,255,255,0.28)';
+    t.beginPath(); t.moveTo(0, H / 2); t.lineTo(W, H / 2); t.stroke();
+    t.beginPath(); t.arc(W / 2, H / 2, 15, 0, Math.PI * 2); t.stroke();
+    t.fillStyle = 'rgba(255,255,255,0.35)';
+    t.beginPath(); t.arc(W / 2, H / 2, 1.6, 0, Math.PI * 2); t.fill();
+    for (const [py, color, start] of [[0, COLORS[1], 0], [H, COLORS[0], Math.PI]]) {
+      t.strokeStyle = color;
+      t.globalAlpha = 0.55;
+      t.lineWidth = 0.8;
+      t.beginPath(); t.arc(W / 2, py, GOAL_HALF + 7, start, start + Math.PI); t.stroke();
+      t.globalAlpha = 1;
+      const glow = t.createRadialGradient(W / 2, py, 2, W / 2, py, GOAL_HALF + 4);
+      glow.addColorStop(0, color);
+      glow.addColorStop(1, 'rgba(0,0,0,0)');
+      t.globalAlpha = 0.35;
+      t.fillStyle = glow;
+      t.fillRect(W / 2 - GOAL_HALF - 4, py - GOAL_HALF - 4, GOAL_HALF * 2 + 8, GOAL_HALF * 2 + 8);
+      t.globalAlpha = 1;
+    }
+    // 枠 (ゴール口は開けておく)
+    t.strokeStyle = 'rgba(220,235,255,0.55)';
+    t.lineWidth = 1.6;
+    t.beginPath();
+    t.moveTo(W / 2 - GOAL_HALF, 0.8); t.lineTo(0.8, 0.8); t.lineTo(0.8, H - 0.8); t.lineTo(W / 2 - GOAL_HALF, H - 0.8);
+    t.moveTo(W / 2 + GOAL_HALF, 0.8); t.lineTo(W - 0.8, 0.8); t.lineTo(W - 0.8, H - 0.8); t.lineTo(W / 2 + GOAL_HALF, H - 0.8);
+    t.stroke();
+    for (const [py, color] of [[0, COLORS[1]], [H, COLORS[0]]]) {
+      t.strokeStyle = color;
+      t.lineWidth = 2.4;
+      t.shadowColor = color;
+      t.shadowBlur = 8;
+      t.beginPath(); t.moveTo(W / 2 - GOAL_HALF, py); t.lineTo(W / 2 + GOAL_HALF, py); t.stroke();
+      t.shadowBlur = 0;
+    }
+  }
 
-    // 得点 (上の人は逆さに)
-    ctx.font = '700 13px -apple-system, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(79,195,247,0.85)';
-    ctx.fillText(score[0], W - 6, H / 2 + 12);
+  function drawMallet(m, color) {
     ctx.save();
-    ctx.translate(W - 6, H / 2 - 12);
-    ctx.rotate(Math.PI);
-    ctx.textAlign = 'left';
-    ctx.fillStyle = 'rgba(255,122,122,0.85)';
-    ctx.fillText(score[1], 0, 0);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.arc(m.x + 1, m.y + 1.6, MALLET_R, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12;
+    const g = ctx.createRadialGradient(m.x - 2.5, m.y - 3, 1, m.x, m.y, MALLET_R);
+    g.addColorStop(0, '#ffffff');
+    g.addColorStop(0.25, color);
+    g.addColorStop(1, shade(color));
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(m.x, m.y, MALLET_R, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.arc(m.x, m.y, MALLET_R * 0.62, 0, Math.PI * 2); ctx.stroke();
+    const k = ctx.createRadialGradient(m.x - 1.2, m.y - 1.6, 0.3, m.x, m.y, MALLET_R * 0.45);
+    k.addColorStop(0, '#ffffff');
+    k.addColorStop(0.4, color);
+    k.addColorStop(1, shade(color));
+    ctx.fillStyle = k;
+    ctx.beginPath(); ctx.arc(m.x, m.y, MALLET_R * 0.45, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawPuck() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath(); ctx.arc(puck.x + 0.8, puck.y + 1.2, PUCK_R, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowColor = '#ffd84d';
+    ctx.shadowBlur = 10;
+    const g = ctx.createRadialGradient(puck.x - 1.5, puck.y - 1.8, 0.5, puck.x, puck.y, PUCK_R);
+    g.addColorStop(0, '#fff7cf');
+    g.addColorStop(0.5, '#ffd84d');
+    g.addColorStop(1, '#c79a12');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(puck.x, puck.y, PUCK_R, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(120,80,0,0.55)';
+    ctx.lineWidth = 0.7;
+    ctx.beginPath(); ctx.arc(puck.x, puck.y, PUCK_R * 0.62, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawScore(value, color, player) {
+    ctx.save();
+    ctx.translate(W - 7, H / 2 + (player === 0 ? 11 : -11));
+    if (player === 1) ctx.rotate(Math.PI);
+    ctx.font = '800 12px ui-rounded, -apple-system, sans-serif';
+    ctx.textAlign = player === 0 ? 'right' : 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.9;
+    ctx.fillText(value, 0, 0);
+    ctx.restore();
+  }
+
+  function draw() {
+    if (!table || table.width !== canvas.width || table.height !== canvas.height) renderTable();
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(table, 0, 0);
     ctx.restore();
 
-    // パックの軌跡
+    drawScore(score[0], COLORS[0], 0);
+    drawScore(score[1], COLORS[1], 1);
+
     trail.forEach((t, i) => {
-      ctx.globalAlpha = (i / trail.length) * 0.25;
-      ctx.fillStyle = '#ffe066';
+      ctx.globalAlpha = (i / trail.length) * 0.22;
+      ctx.fillStyle = '#ffd84d';
       ctx.beginPath();
-      ctx.arc(t.x, t.y, PUCK_R * (0.5 + 0.5 * i / trail.length), 0, Math.PI * 2);
+      ctx.arc(t.x, t.y, PUCK_R * (0.45 + 0.55 * i / trail.length), 0, Math.PI * 2);
       ctx.fill();
     });
     ctx.globalAlpha = 1;
-
-    if (phase === 'play' || phase === 'over' || phase === 'goal') {
-      ctx.fillStyle = '#ffe066';
-      ctx.shadowColor = '#ffe066';
-      ctx.shadowBlur = 8;
-      ctx.beginPath();
-      ctx.arc(puck.x, puck.y, PUCK_R, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-      ctx.lineWidth = 0.8;
-      ctx.beginPath();
-      ctx.arc(puck.x, puck.y, PUCK_R * 0.6, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    mallets.forEach((m, i) => {
-      ctx.fillStyle = COLORS[i];
-      ctx.shadowColor = COLORS[i];
-      ctx.shadowBlur = 10;
-      ctx.beginPath();
-      ctx.arc(m.x, m.y, MALLET_R, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.beginPath();
-      ctx.arc(m.x, m.y, MALLET_R * 0.62, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = COLORS[i];
-      ctx.beginPath();
-      ctx.arc(m.x, m.y, MALLET_R * 0.42, 0, Math.PI * 2);
-      ctx.fill();
-    });
+    drawPuck();
+    mallets.forEach((m, i) => drawMallet(m, COLORS[i]));
 
     if (phase === 'goal' || phase === 'over') {
       // 得点した側から読める向きで表示
-      const scorer = goalScorer;
       ctx.save();
-      ctx.translate(W / 2, H / 2 + (scorer === 0 ? 30 : -30));
-      if (scorer === 1) ctx.rotate(Math.PI);
-      ctx.font = '800 15px -apple-system, sans-serif';
+      ctx.translate(W / 2, H / 2 + (goalScorer === 0 ? 30 : -30));
+      if (goalScorer === 1) ctx.rotate(Math.PI);
+      ctx.font = '900 16px ui-rounded, -apple-system, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillStyle = COLORS[scorer];
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = COLORS[goalScorer];
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = '#fff';
       ctx.fillText(phase === 'over' ? 'WIN!' : 'GOAL!', 0, 0);
       ctx.restore();
     }

@@ -1,4 +1,4 @@
-import { h, s, gameShell, playerPanel, modal, toast, sfx, settings, fitBox, stone, loadPref, savePref, confirm } from '../ui.js';
+import { h, s, gameShell, playerPanel, modal, showResult, toast, sfx, settings, fitBoard, stone, loadPref, savePref, confirm, ensureDefs, woodTexture } from '../ui.js';
 import * as G from './gomoku-logic.js';
 
 const RULES = `
@@ -23,9 +23,10 @@ export function mount(root) {
   const bottom = playerPanel({ name: '黒', mark: stone('black') });
   const panels = { [G.BLACK]: bottom, [G.WHITE]: top };
 
+  ensureDefs();
   const size = pos(N - 1) + GAP;
   const svg = s('svg', { class: 'gomoku-board', viewBox: `0 0 ${size} ${size}` });
-  svg.append(s('rect', { x: 0, y: 0, width: size, height: size, rx: 4, class: 'gk-bg' }));
+  svg.append(s('image', { href: woodTexture({ light: '#ecc884', dark: '#d2a35a', seed: 11 }), x: 0, y: 0, width: size, height: size, preserveAspectRatio: 'none' }));
   const grid = s('g', { class: 'gk-grid' });
   for (let i = 0; i < N; i++) {
     grid.append(s('line', { x1: pos(0), y1: pos(i), x2: pos(N - 1), y2: pos(i) }));
@@ -40,7 +41,7 @@ export function mount(root) {
   const ruleBtn = h('button', { class: 'chip', onclick: chooseRule });
   const hint = h('span', { class: 'hint-line' });
   ui.main.append(top.el, wrap, h('div', { class: 'sub-bar' }, ruleBtn, hint), bottom.el);
-  const unfit = fitBox(wrap, svg);
+  const unfit = fitBoard(ui.main, wrap, svg);
 
   function restart() {
     state = G.initialState();
@@ -102,14 +103,17 @@ export function mount(root) {
     if (next.winner || next.draw) {
       over = true;
       render();
-      setTimeout(() => {
+      setTimeout(async () => {
         sfx('win');
-        modal({
-          title: next.winner ? `${next.winner === G.BLACK ? '黒' : '白'}の勝ち！` : '引き分け',
-          body: h('p', {}, next.winner ? `${state.moves.length}手で決着しました。` : '盤面が埋まりました。'),
-          buttons: [{ label: '閉じる', value: false }, { label: 'もう一度', value: true, primary: true }],
-        }).then((again) => { if (again) restart(); });
-      }, 450);
+        const color = next.winner === G.BLACK ? 'black' : 'white';
+        const again = await showResult({
+          title: next.winner ? `${next.winner === G.BLACK ? '黒' : '白'}の勝ち` : '引き分け',
+          mark: next.winner ? stone(color, 'xl') : null,
+          detail: next.winner ? `${state.moves.length}手で五目がそろいました` : '盤面が埋まりました',
+          flip: settings.faceToFace && next.winner === G.WHITE,
+        });
+        if (again === 'again') restart();
+      }, 650);
       return;
     }
     render();
@@ -121,7 +125,8 @@ export function mount(root) {
     state.board.forEach((v, i) => {
       if (!v) return;
       const cx = pos(i % N), cy = pos(Math.floor(i / N));
-      layer.append(s('circle', { cx, cy, r: 4.4, class: `gk-stone ${v === G.BLACK ? 'black' : 'white'}` }));
+      layer.append(s('circle', { cx: cx + 0.5, cy: cy + 0.8, r: 4.5, class: 'gk-shadow' }));
+      layer.append(s('circle', { cx, cy, r: 4.5, class: `gk-stone ${v === G.BLACK ? 'black' : 'white'} ${i === last ? 'new' : ''}` }));
     });
     if (last !== undefined) {
       layer.append(s('circle', { cx: pos(last % N), cy: pos(Math.floor(last / N)), r: 1.3, class: `gk-last ${state.board[last] === G.BLACK ? 'on-black' : 'on-white'}` }));
@@ -141,7 +146,7 @@ export function mount(root) {
     }
     if (preview !== null) {
       layer.append(s('circle', {
-        cx: pos(preview % N), cy: pos(Math.floor(preview / N)), r: 4.4,
+        cx: pos(preview % N), cy: pos(Math.floor(preview / N)), r: 4.5,
         class: `gk-stone preview ${state.turn === G.BLACK ? 'black' : 'white'}`,
       }));
     }

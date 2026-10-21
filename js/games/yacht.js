@@ -1,4 +1,4 @@
-import { h, gameShell, modal, toast, sfx, settings } from '../ui.js';
+import { h, gameShell, showResult, toast, sfx, settings } from '../ui.js';
 import * as Y from './yacht-logic.js';
 
 const RULES = `
@@ -31,7 +31,7 @@ export function mount(root) {
   const ui = gameShell(root, { title: 'ヨット', rules: RULES, onRestart: restart });
 
   const table = h('table', { class: 'yacht-sheet' });
-  const head = h('tr', {}, h('th', {}, ''), PLAYER.map((name, p) => h('th', { class: `p${p + 1}` }, `${p + 1}P`)));
+  const head = h('tr', {}, h('th', { class: 'sheet-title' }, 'SCORE'), PLAYER.map((name, p) => h('th', { class: `p${p + 1}` }, h('span', { class: 'col-chip' }, `${p + 1}P`))));
   const cellEls = {};
   const rows = [head];
   const addCatRow = (cat) => {
@@ -55,7 +55,7 @@ export function mount(root) {
   const body = h('div', { class: 'yacht-body' },
     h('div', { class: 'sheet-wrap' }, table),
     status,
-    h('div', { class: 'dice-row' }, diceEls),
+    h('div', { class: 'dice-tray' }, h('div', { class: 'dice-row' }, diceEls)),
     action);
   ui.main.append(body);
 
@@ -137,15 +137,21 @@ export function mount(root) {
     startTurn();
   }
 
-  function finish() {
+  async function finish() {
     const [a, b] = sheets.map((sh) => Y.totals(sh).total);
     sfx('win');
     body.classList.remove('flip');
-    modal({
-      title: a === b ? '引き分け' : `${PLAYER[a > b ? 0 : 1]}の勝ち！`,
-      body: h('p', { class: 'result-score' }, `${a} 点 − ${b} 点`),
-      buttons: [{ label: '閉じる', value: false }, { label: 'もう一度', value: true, primary: true }],
-    }).then((again) => { if (again) restart(); });
+    const winner = a === b ? null : a > b ? 0 : 1;
+    const again = await showResult({
+      title: winner === null ? '引き分け' : `${PLAYER[winner]}の勝ち`,
+      accent: winner === null ? undefined : `var(--p${winner + 1})`,
+      detail: h('div', { class: 'score-line' },
+        h('span', { class: 'p1' }, h('small', {}, '1P'), h('b', {}, a)),
+        h('span', { class: 'vs' }, '−'),
+        h('span', { class: 'p2' }, h('b', {}, b), h('small', {}, '2P'))),
+      flip: settings.faceToFace && winner === 1,
+    });
+    if (again === 'again') restart();
   }
 
   function render() {
@@ -174,7 +180,9 @@ export function mount(root) {
     const round = Math.min(12, Object.keys(sheets[turn]).length + 1);
     status.replaceChildren(
       h('span', { class: `turn-badge p${turn + 1}` }, PLAYER[turn]),
-      h('span', {}, ` の番　ラウンド ${round}/12`));
+      h('span', { class: 'round' }, `ラウンド ${round}/12`),
+      h('span', { class: 'rolls', 'aria-label': `残り${rollsLeft}回` },
+        [0, 1, 2].map((i) => h('i', { class: i < rollsLeft ? 'on' : '' }))));
     if (over) {
       action.textContent = 'ゲーム終了';
       action.disabled = true;

@@ -1,5 +1,6 @@
-import { h, gameShell, playerPanel, modal, sfx, settings, fitBox } from '../ui.js';
+import { h, gameShell, playerPanel, modal, showResult, sfx, settings, fitBoard, ensureDefs } from '../ui.js';
 import * as C from './chess-logic.js';
+import { pieceSVG } from './chess-pieces.js';
 
 const RULES = `
 <p>相手のキングを逃げられない状態 (チェックメイト) にしたら勝ちです。白が先手です。</p>
@@ -10,25 +11,24 @@ const RULES = `
 <li>ステイルメイト・駒不足・50手ルール・同一局面3回は引き分けです。</li>
 </ul>`;
 
-// 黒い字形を両陣営で使い、色は CSS で塗る (U+FE0E で絵文字化を防ぐ)
-const GLYPH = { k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' };
 const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 const NAMES = { w: '白', b: '黒' };
 const FILES = 'abcdefgh';
 
-const glyph = (t) => GLYPH[t] + '︎';
-const pieceEl = (p) => h('span', { class: `piece ${p.c}` }, glyph(p.t));
+const pieceEl = (p) => pieceSVG(p.t, p.c);
 
 export function mount(root) {
   let state, history, keys, selected, over, lastMove;
+  ensureDefs();
   const ui = gameShell(root, { title: 'チェス', rules: RULES, onUndo: undo, onRestart: restart });
-  const top = playerPanel({ name: '黒', mark: h('span', { class: 'piece b mini' }, glyph('k')), flip: settings.faceToFace });
-  const bottom = playerPanel({ name: '白', mark: h('span', { class: 'piece w mini' }, glyph('k')) });
+  const top = playerPanel({ name: '黒', mark: pieceSVG('k', 'b'), flip: settings.faceToFace });
+  const bottom = playerPanel({ name: '白', mark: pieceSVG('k', 'w') });
   const panels = { w: bottom, b: top };
   const board = h('div', { class: `chess-board ${settings.faceToFace ? 'f2f' : ''}` });
-  const wrap = h('div', { class: 'board-wrap' }, board);
+  const frame = h('div', { class: 'chess-frame' }, board);
+  const wrap = h('div', { class: 'board-wrap' }, frame);
   ui.main.append(top.el, wrap, bottom.el);
-  const unfit = fitBox(wrap, board);
+  const unfit = fitBoard(ui.main, wrap, frame);
 
   const squares = [];
   for (let i = 0; i < 64; i++) {
@@ -87,7 +87,7 @@ export function mount(root) {
     return modal({
       title: '昇格する駒を選んでください',
       flip: settings.faceToFace && color === 'b',
-      buttons: ['q', 'r', 'b', 'n'].map((t) => ({ label: h('span', { class: `piece ${color} promo` }, glyph(t)), value: t })),
+      buttons: ['q', 'r', 'b', 'n'].map((t) => ({ label: pieceSVG(t, color), value: t })),
       className: 'promo-modal',
     });
   }
@@ -104,14 +104,16 @@ export function mount(root) {
     if (status.over) {
       over = true;
       render(status);
-      setTimeout(() => {
+      setTimeout(async () => {
         sfx('win');
-        modal({
-          title: status.winner ? `${NAMES[status.winner]}の勝ち！` : '引き分け',
-          body: h('p', {}, status.reason),
-          buttons: [{ label: '閉じる', value: false }, { label: 'もう一度', value: true, primary: true }],
-        }).then((again) => { if (again) restart(); });
-      }, 450);
+        const again = await showResult({
+          title: status.winner ? `${NAMES[status.winner]}の勝ち` : '引き分け',
+          mark: status.winner ? pieceSVG('k', status.winner) : null,
+          detail: `${status.reason}・${Math.ceil(history.length / 2)}手`,
+          flip: settings.faceToFace && status.winner === 'b',
+        });
+        if (again === 'again') restart();
+      }, 600);
       return;
     }
     if (status.check) setTimeout(() => sfx('check'), 120);
@@ -143,7 +145,7 @@ export function mount(root) {
     for (const color of ['w', 'b']) {
       const enemy = C.other(color);
       const taken = captures.filter((p) => p.c === enemy).sort((a, b) => order.indexOf(a.t) - order.indexOf(b.t))
-        .map((p) => h('span', { class: `piece ${enemy} tiny` }, glyph(p.t)));
+        .map((p) => pieceSVG(p.t, enemy, 'tiny'));
       const adv = material(color) - material(enemy);
       panels[color].setInfo(h('span', { class: 'captured' }, taken, adv > 0 ? h('small', {}, ` +${adv}`) : null));
       const active = !over && state.turn === color;

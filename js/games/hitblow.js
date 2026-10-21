@@ -21,7 +21,7 @@ const PLAYER = ['プレイヤー1', 'プレイヤー2'];
 
 const peg = (color, extra = '') => h('span', {
   class: `peg ${color == null ? 'empty' : ''} ${extra}`,
-  style: color == null ? null : { background: COLORS[color].hex },
+  style: color == null ? null : { '--c': COLORS[color].hex },
   'aria-label': color == null ? '空' : COLORS[color].name,
 });
 
@@ -86,7 +86,7 @@ export function mount(root) {
       }));
       palette.replaceChildren(...COLORS.slice(0, opts.colors).map((c, ci) => h('button', {
         class: 'palette-btn',
-        style: { background: c.hex },
+        style: { '--c': c.hex },
         'aria-label': c.name,
         disabled: input.length >= LENGTH || (!opts.duplicates && input.includes(ci)),
         onclick: () => { if (input.length < LENGTH) { input.push(ci); sfx('tap'); refresh(); } },
@@ -116,9 +116,10 @@ export function mount(root) {
     return h('ol', { class: 'hb-history' }, list.map((g, i) => h('li', {},
       h('span', { class: 'hb-num' }, i + 1),
       h('span', { class: 'peg-row' }, g.code.map((c) => peg(c))),
-      h('span', { class: 'hb-result' },
-        h('span', { class: 'hit' }, `${g.hit}H`),
-        h('span', { class: 'blow' }, `${g.blow}B`)))));
+      h('span', { class: 'hb-result', 'aria-label': `${g.hit}ヒット ${g.blow}ブロー` },
+        h('span', { class: 'keys' }, Array.from({ length: LENGTH }, (_, k) =>
+          h('i', { class: k < g.hit ? 'k-hit' : k < g.hit + g.blow ? 'k-blow' : '' }))),
+        h('span', { class: 'hb-nums' }, h('b', { class: 'hit' }, g.hit), 'H ', h('b', { class: 'blow' }, g.blow), 'B')))));
   }
 
   function showTurn() {
@@ -162,7 +163,7 @@ export function mount(root) {
     const [a, b] = solvedAt;
     const winner = a !== null && b === null ? 0 : b !== null && a === null ? 1 : null;
     screen(null, h('div', { class: 'hb-card' },
-      h('h2', {}, winner === null ? '引き分け' : `${PLAYER[winner]}の勝ち！`),
+      h('h2', {}, winner === null ? '引き分け' : `${PLAYER[winner]}の勝ち`),
       [0, 1].map((p) => h('div', { class: 'hb-reveal' },
         h('span', { class: `turn-badge p${p + 1}` }, `${PLAYER[p]}の秘密`),
         h('span', { class: 'peg-row' }, secrets[p].map((c) => peg(c))),

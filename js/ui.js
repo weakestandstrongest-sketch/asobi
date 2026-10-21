@@ -21,7 +21,12 @@ function applyProps(el, props) {
     if (v == null || v === false) continue;
     if (k === 'class') el.setAttribute('class', v);
     else if (k === 'html') el.innerHTML = v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') {
+      for (const [prop, val] of Object.entries(v)) {
+        if (prop.startsWith('--')) el.style.setProperty(prop, val);
+        else el.style[prop] = val;
+      }
+    }
     else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2), v);
     else el.setAttribute(k, v === true ? '' : v);
   }
@@ -125,6 +130,9 @@ const ICONS = {
   restart: 'M4 12a8 8 0 108-8 8.5 8.5 0 00-6 2.5L4 8M4 3v5h5',
   help: 'M9.1 9a3 3 0 015.8 1c0 2-3 3-3 3M12 17h.01',
   pause: 'M9 5v14M15 5v14',
+  share: 'M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 002 2h10a2 2 0 002-2v-6',
+  people: 'M9 11a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM2.5 20a6.5 6.5 0 0113 0M16 4.5a3.5 3.5 0 010 6.5M18 14a6 6 0 013.5 6',
+  sound: 'M4 9v6h4l5 4V5L8 9zM16.5 8.5a5 5 0 010 7M19 6a8.5 8.5 0 010 12',
 };
 
 export function icon(name) {
@@ -217,39 +225,117 @@ export function showRules(title, rules) {
   return modal({ title: `${title}のルール`, body: h('div', { class: 'rules', html: rules }), className: 'wide' });
 }
 
-// プレイヤー情報の帯。flip すると上側の人から読める向きになる
-export function playerPanel({ name, mark, flip = false }) {
-  const info = h('div', { class: 'pp-info' });
-  const status = h('div', { class: 'pp-status' });
-  const el = h('div', { class: `player-panel ${flip ? 'flip' : ''}` },
-    h('div', { class: 'pp-main' }, mark, h('span', { class: 'pp-name' }, name)),
-    info,
+// 対局の結果。'again' / 'close' / 'menu' を返す
+export function showResult({ title, detail, accent = 'var(--gold)', mark = null, flip = false, buttons }) {
+  const hero = h('div', { class: 'result-hero', style: { '--accent': accent } },
+    h('div', { class: 'result-burst' }),
+    mark ? h('div', { class: 'result-mark' }, mark) : h('div', { class: 'result-mark', html: CROWN }));
+  return modal({
+    title,
+    body: [hero, detail && h('div', { class: 'result-detail' }, detail)],
+    className: 'result',
+    flip,
+    buttons: buttons || [{ label: '閉じる', value: 'close' }, { label: 'もう一度', value: 'again', primary: true }],
+  });
+}
+
+const CROWN = `<svg viewBox="0 0 64 64" aria-hidden="true"><path d="M8 22l12 10 12-18 12 18 12-10-5 28H13z" fill="currentColor"/>
+<rect x="13" y="52" width="38" height="6" rx="3" fill="currentColor"/><circle cx="8" cy="20" r="4" fill="currentColor"/>
+<circle cx="32" cy="12" r="4" fill="currentColor"/><circle cx="56" cy="20" r="4" fill="currentColor"/></svg>`;
+
+// プレイヤーの名札。flip すると上側の人から読める向きになる
+export function playerPanel({ name, mark, flip = false, color = '' }) {
+  const info = h('div', { class: 'plate-info' });
+  const status = h('div', { class: 'plate-status' }, h('i'), h('span'));
+  const el = h('div', { class: `plate ${flip ? 'flip' : ''}`, style: color ? { '--pc': color } : null },
+    h('div', { class: 'plate-avatar' }, mark),
+    h('div', { class: 'plate-text' }, h('div', { class: 'plate-name' }, name), info),
     status);
   return {
     el,
     setActive(on) { el.classList.toggle('active', on); },
-    setInfo(content) { info.replaceChildren(...[content].flat().filter((c) => c != null)); },
-    setStatus(text) { status.textContent = text || ''; },
+    setInfo(content) { info.replaceChildren(...[content].flat().filter((c) => c != null && c !== '')); },
+    setStatus(text) { status.lastChild.textContent = text || ''; el.classList.toggle('has-status', !!text); },
     setFlip(on) { el.classList.toggle('flip', on); },
   };
 }
 
-// 要素を、親の空き領域に収まる最大の正方形 (または aspect の長方形) にする
-export function fitBox(wrap, el, aspect = 1) {
+// 盤 (el) を、main から他の要素の高さを引いた残りに収まる最大サイズにする。
+// 盤と名札がぴったり並び、余白は上下に均等に回る。
+export function fitBoard(main, wrap, el, aspect = 1) {
   const update = () => {
-    const w = wrap.clientWidth, hgt = wrap.clientHeight;
-    if (!w || !hgt) return;
-    let width = Math.min(w, hgt / aspect);
-    width = Math.floor(width);
+    const cs = getComputedStyle(main);
+    const padV = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const padH = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+    const gap = parseFloat(cs.rowGap) || 0;
+    const kids = [...main.children];
+    const others = kids.filter((c) => c !== wrap).reduce((a, c) => a + c.offsetHeight, 0) + gap * (kids.length - 1);
+    const availH = main.clientHeight - padV - others;
+    const availW = main.clientWidth - padH;
+    if (availH <= 0 || availW <= 0) return;
+    const width = Math.floor(Math.min(availW, availH / aspect));
     el.style.width = width + 'px';
     el.style.height = Math.floor(width * aspect) + 'px';
   };
   const ro = new ResizeObserver(update);
-  ro.observe(wrap);
+  ro.observe(main);
+  for (const c of main.children) if (c !== wrap) ro.observe(c);
   update();
   return () => ro.disconnect();
 }
 
 export function stone(color, extraClass = '') {
   return h('span', { class: `stone-mark ${color} ${extraClass}` });
+}
+
+// ---- 共有の SVG グラデーション ----
+
+export function ensureDefs() {
+  if (document.getElementById('asobi-defs')) return;
+  const svg = s('svg', { id: 'asobi-defs', width: 0, height: 0, 'aria-hidden': 'true', style: { position: 'absolute' } });
+  svg.innerHTML = `<defs>
+    <linearGradient id="cp-w" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fffdf7"/><stop offset="1" stop-color="#d6cbb6"/></linearGradient>
+    <linearGradient id="cp-b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#5e5850"/><stop offset="1" stop-color="#171513"/></linearGradient>
+    <radialGradient id="st-b" cx="0.36" cy="0.3" r="0.75"><stop offset="0" stop-color="#6e6e6e"/><stop offset="0.35" stop-color="#262626"/><stop offset="1" stop-color="#050505"/></radialGradient>
+    <radialGradient id="st-w" cx="0.36" cy="0.3" r="0.8"><stop offset="0" stop-color="#ffffff"/><stop offset="0.5" stop-color="#f1efe8"/><stop offset="1" stop-color="#bdb8ab"/></radialGradient>
+    <linearGradient id="koma-wood" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#fbe9c0"/><stop offset="0.55" stop-color="#efcf8f"/><stop offset="1" stop-color="#dcb06a"/></linearGradient>
+  </defs>`;
+  document.body.prepend(svg);
+}
+
+// ---- 木目テクスチャ (canvas で一度だけ生成) ----
+
+const woodCache = new Map();
+
+export function woodTexture({ light = '#e9c27e', dark = '#c48d45', grain = '90,55,20', size = 512, seed = 7 } = {}) {
+  const key = [light, dark, grain, size, seed].join();
+  if (woodCache.has(key)) return woodCache.get(key);
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  const base = g.createLinearGradient(0, 0, size, size * 0.3);
+  base.addColorStop(0, light);
+  base.addColorStop(0.5, dark);
+  base.addColorStop(1, light);
+  g.fillStyle = base;
+  g.fillRect(0, 0, size, size);
+  let r = seed;
+  const rand = () => { r = (r * 16807) % 2147483647; return r / 2147483647; };
+  for (let i = 0; i < 140; i++) {
+    const x0 = rand() * size * 1.2 - size * 0.1;
+    const amp = 2 + rand() * 10;
+    const freq = 0.004 + rand() * 0.01;
+    const phase = rand() * 6.28;
+    g.strokeStyle = `rgba(${grain},${0.02 + rand() * 0.06})`;
+    g.lineWidth = 0.5 + rand() * 2.5;
+    g.beginPath();
+    for (let y = -10; y <= size + 10; y += 8) {
+      const x = x0 + Math.sin(y * freq + phase) * amp + y * 0.08;
+      if (y < 0) g.moveTo(x, y); else g.lineTo(x, y);
+    }
+    g.stroke();
+  }
+  const url = c.toDataURL('image/jpeg', 0.85);
+  woodCache.set(key, url);
+  return url;
 }

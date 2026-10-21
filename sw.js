@@ -1,6 +1,6 @@
 // オフラインでも遊べるようにするためのキャッシュ。
 // ファイルを更新したら VERSION を上げる。
-const VERSION = 'asobi-v1';
+const VERSION = 'asobi-v2';
 const FILES = [
   './',
   'index.html',
@@ -12,8 +12,10 @@ const FILES = [
   'icons/icon-512.png',
   'js/app.js',
   'js/ui.js',
+  'js/art.js',
   'js/games/airhockey.js',
   'js/games/chess.js',
+  'js/games/chess-pieces.js',
   'js/games/chess-logic.js',
   'js/games/gomoku.js',
   'js/games/gomoku-logic.js',
